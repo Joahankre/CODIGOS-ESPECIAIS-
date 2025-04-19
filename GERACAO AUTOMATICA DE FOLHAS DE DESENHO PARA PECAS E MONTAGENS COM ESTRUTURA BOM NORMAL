@@ -1,0 +1,96 @@
+Imports Inventor.ViewOrientationTypeEnum
+Imports Inventor.DrawingViewStyleEnum
+Imports System.IO
+Imports System.Collections.Generic
+
+Private Sub Main()
+    CriarDesenhosAPartirDoConjunto(ThisDoc.Document)
+End Sub
+
+Private Sub CriarDesenhosAPartirDoConjunto(ByVal oDoc As Inventor.Document)
+    Dim criarDesenhoUnico As Boolean = True
+    
+    Dim oDocumentoDesenho As DrawingDocument
+    Dim oFolha As Sheet
+    Dim oVistaBase As DrawingView
+    Dim oVista2 As DrawingView
+    Dim oVista3 As DrawingView
+    Dim oVista4 As DrawingView 
+
+    Dim EscalaVista As Double = 1/10
+
+    Dim dwgQuery As Integer = MsgBox("Deseja criar desenhos a partir deste conjunto?", vbYesNo, "Seleção de Desenho")
+    
+    If dwgQuery = vbYes Then
+        Dim oConjunto As Inventor.AssemblyDocument
+
+        If oDoc.DocumentType = Inventor.DocumentTypeEnum.kAssemblyDocumentObject Then
+            oConjunto = CType(oDoc, AssemblyDocument)
+
+            If criarDesenhoUnico Then
+                oDocumentoDesenho = ThisApplication.Documents.Add( _
+                    DocumentTypeEnum.kDrawingDocumentObject, _
+                    TemplateFileName:=ThisApplication.FileManager.GetTemplateFile(DocumentTypeEnum.kDrawingDocumentObject), _
+                    CreateVisible:=True)
+            End If
+
+            ' Salva a primeira folha como modelo
+            Dim folhaModelo As Sheet = oDocumentoDesenho.Sheets.Item(1)
+
+            ' Lista de documentos a detalhar
+            Dim docsParaDetalhar As New List(Of Document)
+            Dim caminhosProcessados As New List(Of String)
+
+            ' Verifica se a montagem principal é "Normal"
+            If oConjunto.ComponentDefinition.BOMStructure = BOMStructureEnum.kNormalBOMStructure Then
+                docsParaDetalhar.Add(oConjunto)
+                caminhosProcessados.Add(oConjunto.FullFileName)
+            End If
+
+            ' Verifica todas as peças e submontagens (folhas finais)
+            For Each occ As ComponentOccurrence In oConjunto.ComponentDefinition.Occurrences.AllLeafOccurrences
+                If occ.BOMStructure = BOMStructureEnum.kNormalBOMStructure Then
+                    If Not occ.DefinitionDocumentType = DocumentTypeEnum.kUnknownDocumentObject Then
+                        Dim refDoc As Document = occ.Definition.Document
+                        If Not caminhosProcessados.Contains(refDoc.FullFileName) Then
+                            docsParaDetalhar.Add(refDoc)
+                            caminhosProcessados.Add(refDoc.FullFileName)
+                        End If
+                    End If
+                End If
+            Next
+
+            ' Cria folhas para todos os documentos válidos
+            For Each refDoc As Document In docsParaDetalhar
+                ' Copia a folha modelo
+                Dim docTemporario As DrawingDocument = Nothing
+                docTemporario = ThisApplication.Documents.Add(DocumentTypeEnum.kDrawingDocumentObject, , False)
+                
+                folhaModelo.CopyTo(docTemporario).CopyTo(oDocumentoDesenho)
+
+                If Not docTemporario Is Nothing Then
+                    docTemporario.Close(True)
+                End If
+
+                ' Seleciona a nova folha
+                oFolha = oDocumentoDesenho.Sheets.Item(oDocumentoDesenho.Sheets.Count)
+                oFolha.Name = IO.Path.GetFileNameWithoutExtension(refDoc.FullFileName)
+
+                ' Pontos das vistas
+                Dim oPonto1 = ThisApplication.TransientGeometry.CreatePoint2d(11, 11)
+                Dim oPonto2 = ThisApplication.TransientGeometry.CreatePoint2d(28, 11)
+                Dim oPonto3 = ThisApplication.TransientGeometry.CreatePoint2d(11, 20)
+                Dim oPonto4 = ThisApplication.TransientGeometry.CreatePoint2d(28, 20)
+
+                ' Criação das vistas
+                oVistaBase = oFolha.DrawingViews.AddBaseView( _
+                    refDoc, oPonto1, EscalaVista, _
+                    kFrontViewOrientation, DrawingViewStyleEnum.kHiddenLineRemovedDrawingViewStyle)
+
+                oVista2 = oFolha.DrawingViews.AddProjectedView(oVistaBase, oPonto2, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, EscalaVista)
+                oVista3 = oFolha.DrawingViews.AddProjectedView(oVistaBase, oPonto3, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, EscalaVista)
+                oVista4 = oFolha.DrawingViews.AddProjectedView(oVistaBase, oPonto4, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, EscalaVista)
+            Next
+        End If
+    End If
+End Sub
