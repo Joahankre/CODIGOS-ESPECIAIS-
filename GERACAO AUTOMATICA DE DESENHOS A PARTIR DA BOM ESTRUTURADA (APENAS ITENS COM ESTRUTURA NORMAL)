@@ -1,0 +1,85 @@
+Imports Inventor.ViewOrientationTypeEnum
+Imports Inventor.DrawingViewStyleEnum
+Imports System.IO
+
+Private Sub Main()
+    CriarDesenhosAPartirDaEstruturaBOM(ThisDoc.Document)
+End Sub
+
+Private Sub CriarDesenhosAPartirDaEstruturaBOM(ByVal oDoc As Inventor.Document)
+    Dim caminhoTemplate As String = "C:\Users\Public\Documents\Autodesk\Inventor 2025\Templates\en-US\Metric\ANSI (mm).idw"
+    Dim criarDesenhoUnico As Boolean = True
+
+    Dim oDocumentoDesenho As DrawingDocument
+    Dim oFolha As Sheet
+    Dim oVistaBase As DrawingView
+    Dim oVista2 As DrawingView
+    Dim oVista3 As DrawingView
+    Dim oVista4 As DrawingView
+
+    Dim EscalaVista As Double = 1 / 10
+
+    Dim dwgQuery As Integer = MsgBox("Deseja criar desenhos a partir da ESTRUTURA BOM?", vbYesNo, "Seleção de Desenho")
+
+    If dwgQuery = vbYes Then
+        If oDoc.DocumentType = Inventor.DocumentTypeEnum.kAssemblyDocumentObject Then
+            Dim oConjunto As AssemblyDocument = CType(oDoc, AssemblyDocument)
+            Dim oBOM As BOM = oConjunto.ComponentDefinition.BOM
+
+            oBOM.StructuredViewEnabled = True
+            Dim oBOMView As BOMView = oBOM.BOMViews.Item("Structured")
+
+            If criarDesenhoUnico Then
+                oDocumentoDesenho = ThisApplication.Documents.Add( _
+                    DocumentTypeEnum.kDrawingDocumentObject, _
+                    TemplateFileName:=caminhoTemplate, _
+                    CreateVisible:=True)
+            End If
+
+            Dim folhaModelo As Sheet = oDocumentoDesenho.Sheets.Item(1)
+
+            For Each oBOMRow As BOMRow In oBOMView.BOMRows
+                If oBOMRow.ComponentDefinitions Is Nothing Then Continue For
+
+                For Each compDef As ComponentDefinition In oBOMRow.ComponentDefinitions
+                    ' Ignora Content Center
+                    If compDef.Document.FullFileName.Contains("Content Center") Then Continue For
+
+                    ' ✅ Filtro: somente estrutura BOM "Normal"
+                    If compDef.BOMStructure <> BOMStructureEnum.kNormalBOMStructure Then Continue For
+
+                    ' Criar folha nova
+                    If criarDesenhoUnico Then
+                        Dim docTemporario As DrawingDocument = ThisApplication.Documents.Add(DocumentTypeEnum.kDrawingDocumentObject, , False)
+                        folhaModelo.CopyTo(docTemporario).CopyTo(oDocumentoDesenho)
+                        docTemporario.Close(True)
+
+                        oFolha = oDocumentoDesenho.Sheets.Item(oDocumentoDesenho.Sheets.Count)
+                        oFolha.Name = IO.Path.GetFileNameWithoutExtension(compDef.Document.FullFileName)
+                    Else
+                        oDocumentoDesenho = ThisApplication.Documents.Add( _
+                            DocumentTypeEnum.kDrawingDocumentObject, _
+                            TemplateFileName:=caminhoTemplate, _
+                            CreateVisible:=True)
+                        oFolha = oDocumentoDesenho.Sheets.Item(1)
+                    End If
+
+                    ' Pontos das vistas
+                    Dim oPontoBase = ThisApplication.TransientGeometry.CreatePoint2d(10, 25) ' Frente
+                    Dim oPontoSup = ThisApplication.TransientGeometry.CreatePoint2d(10, 10)  ' Superior
+                    Dim oPontoLat = ThisApplication.TransientGeometry.CreatePoint2d(30, 25)  ' Esquerda
+                    Dim oPontoIso = ThisApplication.TransientGeometry.CreatePoint2d(30, 10)  ' Isométrica
+
+                    ' Criação das vistas
+                    oVistaBase = oFolha.DrawingViews.AddBaseView( _
+                        compDef.Document, oPontoBase, EscalaVista, _
+                        kFrontViewOrientation, DrawingViewStyleEnum.kHiddenLineRemovedDrawingViewStyle)
+
+                    oVista2 = oFolha.DrawingViews.AddProjectedView(oVistaBase, oPontoLat, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, EscalaVista)
+                    oVista3 = oFolha.DrawingViews.AddProjectedView(oVistaBase, oPontoSup, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, EscalaVista)
+                    oVista4 = oFolha.DrawingViews.AddProjectedView(oVistaBase, oPontoIso, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, EscalaVista)
+                Next
+            Next
+        End If
+    End If
+End Sub
