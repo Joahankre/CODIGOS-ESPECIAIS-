@@ -1,0 +1,155 @@
+Sub Main()
+    If Not TypeOf ThisDoc.Document Is DrawingDocument Then Exit Sub
+
+    Dim dwgDoc As DrawingDocument = ThisDoc.Document
+    Dim pageStart As Integer, pageEnd As Integer
+    Dim userChoice As String, pageRange As String
+    Dim DebugMode As Boolean : DebugMode = False  ' <- Ativar para ver mensagens de depuração
+
+    userChoice = InputBox("Escolha uma opção: 1 para começar de uma página até o final, ou 2 para intervalo específico (ex: 1-3):", "Escolha a Opção", "1")
+
+    If userChoice = "1" Then
+        pageStart = CInt(InputBox("Insira o número da página inicial:", "Definir Página", "1"))
+        pageEnd = dwgDoc.Sheets.Count
+    ElseIf userChoice = "2" Then
+        pageRange = InputBox("Insira o intervalo de páginas (ex: 1-3):", "Definir Intervalo", "1-1")
+        If Not ValidatePageRange(pageRange, pageStart, pageEnd) Then
+            MsgBox("Intervalo inválido.")
+            Exit Sub
+        End If
+    Else
+        MsgBox("Opção inválida. Use '1' ou '2'.")
+        Exit Sub
+    End If
+
+    If pageStart <= 0 Or pageEnd > dwgDoc.Sheets.Count Or pageStart > pageEnd Then
+        MsgBox("Intervalo de páginas inválido.")
+        Exit Sub
+    End If
+
+    ' Carregar BOM da montagem referenciada na primeira folha
+    Dim BOMRows As BOMRowsEnumerator = GetBOMRows()
+    If BOMRows Is Nothing Then
+        MsgBox("Erro ao identificar a montagem principal na primeira folha.")
+        Exit Sub
+    End If
+
+    Dim sheetCounter As Integer = 1
+    For Each dwgSheet As Sheet In dwgDoc.Sheets
+        If sheetCounter >= pageStart And sheetCounter <= pageEnd Then
+            If dwgSheet.DrawingViews.Count > 0 Then
+                Dim refView As DrawingView = dwgSheet.DrawingViews(1)
+                Dim refDoc As Document = refView.ReferencedDocumentDescriptor.ReferencedDocument
+                Dim docFName As String = System.IO.Path.GetFileName(refDoc.FullFileName)
+
+                Dim prtNumber As String = SanitizeText(iProperties.Value(docFName, "Project", "Description"))
+                Dim stockNumber As String = SanitizeText(iProperties.Value(docFName, "Project", "Part Number"))
+                Dim partNumberChave As String = stockNumber
+
+                Dim categoria As String = ""
+                On Error Resume Next
+                categoria = iProperties.Value(docFName, "Custom", "Categoria")
+                On Error GoTo 0
+                If categoria = "" Then categoria = "N/A"
+
+                Dim itemNumber As String = SearchBOMByPartNumber(BOMRows, partNumberChave)
+                If itemNumber = "" Then itemNumber = "N/A"
+
+                If DebugMode Then
+                    MsgBox("Doc: " & docFName & vbCrLf & "Part: " & prtNumber & vbCrLf & "Stock: " & stockNumber & vbCrLf & "Item: " & itemNumber)
+                End If
+
+                If categoria = "N/A" Or prtNumber = "X" Or stockNumber = "X" Then Continue For
+
+                If InStr(categoria, " - ") > 0 Then
+                    Dim parts() As String = Split(categoria, " - ")
+                    If UBound(parts) >= 1 Then categoria = parts(1)
+                End If
+
+                If Len(prtNumber) > 25 Then prtNumber = Left(prtNumber, 20)
+
+                Dim newSheetName As String = categoria & " - " & itemNumber & " - " & stockNumber & " - " & prtNumber
+
+                If IsAssemblyDocument(docFName) And Not newSheetName.EndsWith("ASS'Y") Then
+                    newSheetName &= " ASS'Y"
+                End If
+
+                dwgSheet.Name = newSheetName
+            End If
+        End If
+        sheetCounter += 1
+    Next
+End Sub
+
+' ================= FUNÇÕES AUXILIARES =====================
+
+Function GetBOMRows() As BOMRowsEnumerator
+    On Error GoTo ErrHandler
+
+    Dim dwgDoc As DrawingDocument = ThisDoc.Document
+    Dim firstSheet As Sheet = dwgDoc.Sheets.Item(1)
+
+    If firstSheet.DrawingViews.Count = 0 Then GoTo ErrHandler
+
+    Dim refDoc As Document = firstSheet.DrawingViews(1).ReferencedDocumentDescriptor.ReferencedDocument
+    If Not TypeOf refDoc Is AssemblyDocument Then GoTo ErrHandler
+
+    Dim asmDoc As AssemblyDocument = refDoc
+
+    With asmDoc.ComponentDefinition.BOM
+        .StructuredViewEnabled = True
+        .StructuredViewFirstLevelOnly = False
+        GetBOMRows = .BOMViews.Item("Structured").BOMRows
+    End With
+    Exit Function
+
+ErrHandler:
+    GetBOMRows = Nothing
+End Function
+
+Function SearchBOMByPartNumber(rows As BOMRowsEnumerator, targetPartNumber As String) As String
+    For Each row As BOMRow In rows
+        Dim def As ComponentDefinition = row.ComponentDefinitions.Item(1)
+        Dim rowPartNumber As String = def.Document.PropertySets.Item("Design Tracking Properties")("Part Number").Value
+        If UCase(rowPartNumber) = UCase(targetPartNumber) Then
+            SearchBOMByPartNumber = row.ItemNumber
+            Exit Function
+        End If
+        If Not row.ChildRows Is Nothing Then
+            SearchBOMByPartNumber = SearchBOMByPartNumber(row.ChildRows, targetPartNumber)
+            If SearchBOMByPartNumber <> "" Then Exit Function
+        End If
+    Next
+    SearchBOMByPartNumber = ""
+End Function
+
+Function ValidatePageRange(pageRange As String, ByRef pageStart As Integer, ByRef pageEnd As Integer) As Boolean
+    Try
+        Dim parts() As String = Split(pageRange, "-")
+        If parts.Length = 2 Then
+            pageStart = CInt(parts(0))
+            pageEnd = CInt(parts(1))
+            Return True
+        End If
+    Catch
+        Return False
+    End Try
+    Return False
+End Function
+
+Function SanitizeText(inputText As String) As String
+    On Error GoTo HandleError
+    Dim sanitizedText As String = inputText
+    For i As Integer = 1 To Len(sanitizedText)
+        If Not Mid(sanitizedText, i, 1) Like "[A-Za-z0-9 ]" Then
+            sanitizedText = Replace(sanitizedText, Mid(sanitizedText, i, 1), "_")
+        End If
+    Next
+    Return sanitizedText
+HandleError:
+    Return "X"
+End Function
+
+Function IsAssemblyDocument(docName As String) As Boolean
+    Return UCase(System.IO.Path.GetExtension(docName)) = ".IAM"
+End Function
