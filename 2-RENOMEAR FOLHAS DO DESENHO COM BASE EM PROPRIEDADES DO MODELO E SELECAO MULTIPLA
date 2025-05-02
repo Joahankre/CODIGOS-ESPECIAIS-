@@ -1,0 +1,154 @@
+Sub Main()
+    If Not TypeOf ThisDoc.Document Is DrawingDocument Then Exit Sub
+
+    Dim dwgDoc As DrawingDocument = ThisDoc.Document
+    Dim DebugMode As Boolean : DebugMode = False
+
+    ' Obtem todos os nomes das folhas
+    Dim allSheetNames As New List(Of String)
+    For Each sht As Sheet In dwgDoc.Sheets
+        allSheetNames.Add(sht.Name)
+    Next
+
+    ' Seleção múltipla de folhas
+    Dim selectedSheets As IEnumerable(Of Object) = MultiSelectListBox("Selecione as folhas para renomear:", allSheetNames, Nothing, "Renomear Folhas", "Folhas do desenho")
+
+    If selectedSheets Is Nothing OrElse selectedSheets.Count = 0 Then
+        MsgBox("Nenhuma folha foi selecionada.")
+        Exit Sub
+    End If
+
+    ' Obtém o BOM da montagem principal
+    Dim BOMRows As BOMRowsEnumerator = GetBOMRows()
+    If BOMRows Is Nothing Then
+        MsgBox("Erro ao obter o BOM da montagem principal.")
+        Exit Sub
+    End If
+
+    ' Loop pelas folhas selecionadas
+    For Each dwgSheet As Sheet In dwgDoc.Sheets
+        If selectedSheets.Contains(dwgSheet.Name) Then
+            If dwgSheet.DrawingViews.Count > 0 Then
+                Dim refView As DrawingView = dwgSheet.DrawingViews(1)
+                Dim refDoc As Document = refView.ReferencedDocumentDescriptor.ReferencedDocument
+                Dim docFName As String = System.IO.Path.GetFileName(refDoc.FullFileName)
+
+                Dim prtNumber As String = SanitizeText(iProperties.Value(docFName, "Project", "Description"))
+                Dim stockNumber As String = SanitizeText(iProperties.Value(docFName, "Project", "Part Number"))
+                Dim partNumberChave As String = stockNumber
+
+                Dim categoria As String = ""
+                On Error Resume Next
+                categoria = iProperties.Value(docFName, "Custom", "Categoria")
+                On Error GoTo 0
+                If categoria = "" Then categoria = "N/A"
+
+                Dim itemNumber As String = SearchBOMByPartNumber(BOMRows, partNumberChave)
+                If itemNumber = "" Then itemNumber = "N/A"
+
+                If DebugMode Then
+                    MsgBox("Doc: " & docFName & vbCrLf & "Part: " & prtNumber & vbCrLf & "Stock: " & stockNumber & vbCrLf & "Item: " & itemNumber)
+                End If
+
+                If categoria = "N/A" Or prtNumber = "X" Or stockNumber = "X" Then Continue For
+
+                If InStr(categoria, " - ") > 0 Then
+                    Dim parts() As String = Split(categoria, " - ")
+                    If UBound(parts) >= 1 Then categoria = parts(1)
+                End If
+
+                If Len(prtNumber) > 25 Then prtNumber = Left(prtNumber, 20)
+
+                Dim newSheetName As String = categoria & " - " & itemNumber & " - " & stockNumber & " - " & prtNumber
+
+                If IsAssemblyDocument(docFName) And Not newSheetName.EndsWith("ASS'Y") Then
+                    newSheetName &= " ASS'Y"
+                End If
+
+                dwgSheet.Name = newSheetName
+            End If
+        End If
+    Next
+End Sub
+
+' ==============================================
+' Função para seleção múltipla (ListBox)
+Function MultiSelectListBox(Optional Instructions As String = "", Optional Items As IEnumerable = Nothing, Optional DefaultValue As Object = Nothing, Optional Title As String = "", Optional ListName As String = "") As IEnumerable(Of Object)
+    Using oILBD As New Autodesk.iLogic.Runtime.InputListBoxDialog(Title, ListName, Instructions, Items, DefaultValue)
+        Dim oLB As System.Windows.Forms.ListBox = oILBD.Controls.Item(0).Controls.Item(2)
+        oLB.SelectionMode = System.Windows.Forms.SelectionMode.MultiSimple
+        Dim oDlgResult As System.Windows.Forms.DialogResult = oILBD.ShowDialog()
+        Return oLB.SelectedItems.Cast(Of Object)()
+    End Using
+End Function
+
+' ==============================================
+' Obter o BOM da montagem referenciada na primeira folha
+Function GetBOMRows() As BOMRowsEnumerator
+    On Error GoTo ErrHandler
+
+    Dim dwgDoc As DrawingDocument = ThisDoc.Document
+    Dim firstSheet As Sheet = dwgDoc.Sheets.Item(1)
+
+    If firstSheet.DrawingViews.Count = 0 Then GoTo ErrHandler
+
+    Dim refDoc As Document = firstSheet.DrawingViews(1).ReferencedDocumentDescriptor.ReferencedDocument
+    If Not TypeOf refDoc Is AssemblyDocument Then GoTo ErrHandler
+
+    Dim asmDoc As AssemblyDocument = refDoc
+
+    With asmDoc.ComponentDefinition.BOM
+        .StructuredViewEnabled = True
+        .StructuredViewFirstLevelOnly = False
+        GetBOMRows = .BOMViews.Item("Structured").BOMRows
+    End With
+    Exit Function
+
+ErrHandler:
+    GetBOMRows = Nothing
+    MsgBox("Erro ao obter o BOM da montagem. Verifique a montagem e tente novamente.", MsgBoxStyle.Critical, "Erro")
+End Function
+
+' ==============================================
+' Busca o número do item no BOM pelo número da peça
+Function SearchBOMByPartNumber(rows As BOMRowsEnumerator, targetPartNumber As String) As String
+    For Each row As BOMRow In rows
+        Try
+            Dim def As ComponentDefinition = row.ComponentDefinitions.Item(1)
+            Dim rowPartNumber As String = def.Document.PropertySets.Item("Design Tracking Properties")("Part Number").Value
+
+            If UCase(rowPartNumber) = UCase(targetPartNumber) Then
+                Return row.ItemNumber
+            End If
+        Catch ex As Exception
+            ' Ignore error if PropertySet is not found
+        End Try
+
+        If Not row.ChildRows Is Nothing Then
+            Dim childItemNumber As String = SearchBOMByPartNumber(row.ChildRows, targetPartNumber)
+            If childItemNumber <> "" Then
+                Return childItemNumber
+            End If
+        End If
+    Next
+    Return ""
+End Function
+
+' ==============================================
+' Limpeza de texto para nomes de folha
+Function SanitizeText(inputText As String) As String
+    Dim sanitizedText As String = inputText
+    Dim invalidChars As String = "<>:\""/\|?*"
+    
+    For Each c As Char In invalidChars
+        sanitizedText = sanitizedText.Replace(c, "_")
+    Next
+
+    Return sanitizedText
+End Function
+
+' ==============================================
+' Verifica se é um arquivo de montagem
+Function IsAssemblyDocument(docName As String) As Boolean
+    Return UCase(System.IO.Path.GetExtension(docName)) = ".IAM"
+End Function
