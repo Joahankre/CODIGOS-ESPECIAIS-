@@ -1,0 +1,75 @@
+' Define uma estrutura para armazenar informações dos componentes
+Class PartInfo
+    Public Number As Integer
+    Public ReferencedFile As String
+End Class
+
+Sub Main()
+    ' Verifica se o documento ativo é um desenho
+    If ThisApplication.ActiveDocument.DocumentType <> DocumentTypeEnum.kDrawingDocumentObject Then
+        MessageBox.Show("Abra um documento de desenho antes de executar esta regra.", "iLogic")
+        Exit Sub
+    End If
+
+    Dim drawDoc As DrawingDocument = ThisApplication.ActiveDocument
+    Dim baseSheet As Sheet = drawDoc.Sheets.Item(1)
+
+    ' Verifica se há balões na primeira folha
+    If baseSheet.Balloons.Count = 0 Then
+        MessageBox.Show("A primeira folha não possui balões.", "iLogic")
+        Exit Sub
+    End If
+
+    ' Obtém a referência da BOM a partir do primeiro balão
+    Dim valSet As BalloonValueSet = baseSheet.Balloons.Item(1).BalloonValueSets.Item(1)
+    Dim drawBOM As DrawingBOM = valSet.ReferencedRow.Parent
+    Dim partInfoList As New List(Of PartInfo)
+
+    ' Tenta identificar a coluna que contém o número do item
+    Dim itemColumnIndex As Integer = -1
+    For i As Integer = 1 To drawBOM.DrawingBOMColumns.Count
+        If drawBOM.DrawingBOMColumns.Item(i).Title.ToLower().Contains("item") Then
+            itemColumnIndex = i
+            Exit For
+        End If
+    Next
+
+    If itemColumnIndex = -1 Then
+        MessageBox.Show("Não foi possível encontrar a coluna de número de item na lista de materiais.", "iLogic")
+        Exit Sub
+    End If
+
+    ' Armazena os dados da BOM da primeira folha
+    For i As Integer = 1 To drawBOM.DrawingBOMRows.Count
+        Dim row As DrawingBOMRow = drawBOM.DrawingBOMRows.Item(i)
+        Dim partDef As ComponentDefinition = row.BOMRow.ComponentDefinitions.Item(1)
+
+        Dim pi As New PartInfo
+        pi.ReferencedFile = partDef.Document.FullFileName
+        pi.Number = CInt(row.Item(itemColumnIndex).Value)
+        partInfoList.Add(pi)
+    Next
+
+    ' Itera nas demais folhas e atualiza os balões
+    For sheetIndex As Integer = 2 To drawDoc.Sheets.Count
+        Dim currentSheet As Sheet = drawDoc.Sheets.Item(sheetIndex)
+
+        For Each balloon As Balloon In currentSheet.Balloons
+            Dim balloonValSet As BalloonValueSet = balloon.BalloonValueSets.Item(1)
+            Dim fileName As String = balloonValSet.ReferencedFiles.Item(1).FullFileName
+
+            ' Verifica se o componente já está listado na BOM
+            For Each pi As PartInfo In partInfoList
+                If fileName = pi.ReferencedFile Then
+                    ' Se o número do item for diferente, sobrescreve
+                    If balloonValSet.ItemNumber <> pi.Number Then
+                        balloonValSet.OverrideValue = pi.Number
+                    End If
+                    Exit For
+                End If
+            Next
+        Next
+    Next
+
+    MessageBox.Show("Balões atualizados com base na primeira folha.", "iLogic")
+End Sub
