@@ -1,109 +1,120 @@
-SUB MAIN()
-    ' VERIFICA SE O DOCUMENTO ATUAL E UM DESENHO
-    IF NOT TYPEOF THISDOC.DOCUMENT IS DRAWINGDOCUMENT THEN
-        MSGBOX("O DOCUMENTO ATUAL NAO E UM DESENHO.", MSGBOXSTYLE.CRITICAL, "ERRO")
-        EXIT SUB
-    END IF
+Sub Main()
+    ' Opções para o usuário selecionar
+    Dim oOptions() As String = {"TORNAR OPERAÇÕES SILENCIOSAS", _
+                                "EXCLUIR TODAS AS FOLHAS PARA IMPRESSÃO", _
+                                "INCLUIR TODAS AS FOLHAS PARA IMPRESSÃO", _
+                                "SELECIONAR FOLHAS PARA IMPRESSÃO"}
 
-    DIM DWGDOC AS DRAWINGDOCUMENT = THISDOC.DOCUMENT
+    ' Chama a função de seleção múltipla
+    Dim Selected As List(Of String) = MultiSelectListBox("Selecione as opções", oOptions, Nothing, "Seleção de Opções", "MINHA LISTA DE OPÇÕES")
 
-    ' OBTEM TODOS OS NOMES DAS FOLHAS
-    DIM ALLSHEETNAMES AS NEW LIST(OFTSTRING)
-    FOR EACH SHT AS SHEET IN DWGDOC.SHEETS
-        ALLSHEETNAMES.ADD(SHT.NAME)
-    NEXT
+    ' Variável para determinar se as mensagens serão silenciosas
+    Dim silentMode As Boolean = False
 
-    ' ADICIONA AS OPCOES DE "EXCLUIR TODAS AS FOLHAS" E "INCLUIR TODAS AS FOLHAS" NO INICIO DA LISTA
-    ALLSHEETNAMES.INSERT(0, "EXCLUIR TODAS AS FOLHAS PARA IMPRESSAO")
-    ALLSHEETNAMES.INSERT(1, "INCLUIR TODAS AS FOLHAS PARA IMPRESSAO")
+    ' Verifica se o usuário selecionou algo
+    If Selected Is Nothing OrElse Selected.Count = 0 Then
+        MessageBox.Show("Nada foi selecionado da lista.", "Nenhuma Seleção", MessageBoxButtons.OK, MessageBoxIcon.Exclamation)
+    Else
+        ' Processa as opções selecionadas
+        For Each sOption As String In Selected
+            If sOption = "TORNAR OPERAÇÕES SILENCIOSAS" Then
+                ' Ativa o modo silencioso
+                silentMode = True
+                MessageBox.Show("As operações seguintes serão silenciosas e não exibirão mensagens.", "Modo Silencioso Ativado")
+            ElseIf sOption = "EXCLUIR TODAS AS FOLHAS PARA IMPRESSÃO" Then
+                ' Exclui todas as folhas da impressão
+                ExcluirFolhasDaImpressao(silentMode)
+            ElseIf sOption = "INCLUIR TODAS AS FOLHAS PARA IMPRESSÃO" Then
+                ' Inclui todas as folhas na impressão
+                IncluirFolhasNaImpressao(silentMode)
+            ElseIf sOption = "SELECIONAR FOLHAS PARA IMPRESSÃO" Then
+                ' Chama a função para selecionar as folhas e garantir que somente as selecionadas sejam ativadas
+                SelecionarFolhasParaImpressao(silentMode)
+            End If
+        Next
+    End If
+End Sub
 
-    ' CHAMA A FUNCAO DE SELECAO MULTIPLA PARA AS FOLHAS
-    DIM SELECTEDSHEETS AS LIST(OFTSTRING) = MULTISELECTLISTBOX("SELECIONE AS FOLHAS OU OPCOES", ALLSHEETNAMES, NOTHING, "SELECAO DE FOLHAS", "FOLHAS DISPONIVEIS")
+' Função para selecionar folhas para impressão (ativa as selecionadas e desativa as não selecionadas)
+Sub SelecionarFolhasParaImpressao(silentMode As Boolean)
+    ' Recebe o documento de desenho ativo
+    Dim drawDoc As DrawingDocument = ThisDoc.Document
 
-    ' VERIFICA SE O USUARIO SELECIONOU ALGO
-    IF SELECTEDSHEETS IS NOTHING ORELSE SELECTEDSHEETS.COUNT = 0 THEN
-        MSGBOX("NENHUMA FOLHA FOI SELECIONADA.", MSGBOXSTYLE.EXCLAMATION, "NENHUMA SELECAO")
-        EXIT SUB
-    END IF
+    ' Obter todos os nomes das folhas
+    Dim allSheetNames As New List(Of String)
+    For Each drawSheet As Sheet In drawDoc.Sheets
+        allSheetNames.Add(drawSheet.Name)
+    Next
 
-    ' PROCESSA AS OPCOES SELECIONADAS
-    FOR EACH SHEETNAME AS STRING IN SELECTEDSHEETS
-        IF SHEETNAME = "EXCLUIR TODAS AS FOLHAS PARA IMPRESSAO" THEN
-            EXCLUIRFOLHASDAIMPRESSAO()
-        ELSEIF SHEETNAME = "INCLUIR TODAS AS FOLHAS PARA IMPRESSAO" THEN
-            INCLUIRFOLHASNAIMPRESSAO()
-        ELSE
-            ' ATIVA A FOLHA SELECIONADA PARA IMPRESSAO
-            ATIVARFOLHAPARAIMPRESSAO(SHEETNAME)
-        END IF
-    NEXT
+    ' Chama a caixa de seleção múltipla
+    Dim selectedSheets As List(Of String) = MultiSelectListBox("Selecione as folhas para impressão:", allSheetNames, Nothing, "Folhas para Impressão", "Folhas do desenho")
 
-    ' EXIBIR MENSAGEM DE SUCESSO
-    MSGBOX("AS FOLHAS SELECIONADAS FORAM PROCESSADAS.", MSGBOXSTYLE.INFORMATION, "PROCESSO CONCLUIDO")
-END SUB
+    If selectedSheets Is Nothing OrElse selectedSheets.Count = 0 Then
+        If Not silentMode Then
+            MessageBox.Show("Nenhuma folha foi selecionada para impressão.", "Seleção Vazia", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        End If
+        Exit Sub
+    End If
 
-' ===========================================
-' FUNCAO PARA CRIAR UMA CAIXA DE SELECAO MULTIPLA
-FUNCTION MULTISELECTLISTBOX(OPTIONAL INSTRUCTIONS AS STRING = VBNULSTRING, _
-OPTIONAL ITEMS AS IENUMERABLE = NOTHING, OPTIONAL DEFAULTVALUE AS OBJECT = NOTHING, _
-OPTIONAL TITLE AS STRING = NOTHING, OPTIONAL LISTNAME AS STRING = NOTHING) AS LIST(OFTSTRING)
-    USING OILBD AS NEW INPUTLISTBOXDIALOG(TITLE, LISTNAME, INSTRUCTIONS, ITEMS, DEFAULTVALUE)
-        DIM OLB AS SYSTEM.WINDOWS.FORMS.LISTBOX = OILBD.CONTROLS.ITEM(0).CONTROLS.ITEM(2)
-        OLB.SELECTIONMODE = SYSTEM.WINDOWS.FORMS.SELECTIONMODE.MULTISIMPLE
-        DIM ODLGRESULT AS SYSTEM.WINDOWS.FORMS.DIALOGRESULT = OILBD.SHOWDIALOG()
+    ' Itera por todas as folhas e ativa ou desativa conforme a seleção
+    For Each drawSheet As Sheet In drawDoc.Sheets
+        If selectedSheets.Contains(drawSheet.Name) Then
+            ' Ativa para impressão (caso esteja desativada)
+            drawSheet.ExcludeFromPrinting = False
+        Else
+            ' Exclui da impressão (caso não esteja selecionada)
+            drawSheet.ExcludeFromPrinting = True
+        End If
+    Next
 
-        ' OBTENHA OS ITENS SELECIONADOS DIRETAMENTE
-        DIM SELECTEDITEMS AS NEW LIST(OFTSTRING)
-        FOR EACH ITEM IN OLB.SELECTEDITEMS
-            SELECTEDITEMS.ADD(ITEM.TOSTRING())
-        NEXT
+    If Not silentMode Then
+        MessageBox.Show("As folhas selecionadas foram ativadas para impressão e as outras excluídas.", "Processo Concluído", MessageBoxButtons.OK, MessageBoxIcon.Information)
+    End If
+End Sub
 
-        ' RETORNA A LISTA DE ITENS SELECIONADOS
-        IF SELECTEDITEMS.COUNT > 0 THEN
-            RETURN SELECTEDITEMS
-        ELSE
-            RETURN NOTHING
-        END IF
-    END USING
-END FUNCTION
+' Função para criar uma caixa de seleção múltipla
+Function MultiSelectListBox(Optional Instructions As String = vbNullString, _
+                            Optional Items As IEnumerable = Nothing, Optional DefaultValue As Object = Nothing, _
+                            Optional Title As String = Nothing, Optional ListName As String = Nothing) As List(Of String)
+    Using oILBD As New InputListBoxDialog(Title, ListName, Instructions, Items, DefaultValue)
+        Dim oLB As System.Windows.Forms.ListBox = oILBD.Controls.Item(0).Controls.Item(2)
+        oLB.SelectionMode = System.Windows.Forms.SelectionMode.MultiSimple
+        Dim oDlgResult As System.Windows.Forms.DialogResult = oILBD.ShowDialog()
+        Dim oSOC As ListBox.SelectedObjectCollection = oLB.SelectedItems
+        If (oSOC Is Nothing) OrElse (oSOC.Count = 0) Then
+            Return Nothing
+        Else
+            Return oSOC.Cast(Of String).ToList
+        End If
+    End Using
+End Function
 
-' FUNCAO PARA ATIVAR UMA FOLHA PARA IMPRESSAO
-SUB ATIVARFOLHAPARAIMPRESSAO(SHEETNAME AS STRING)
-    ' RECEBE O DOCUMENTO DE DESENHO ATIVO
-    DIM DWGDOC AS DRAWINGDOCUMENT = THISDOC.DOCUMENT
+' Função para excluir todas as folhas da impressão
+Sub ExcluirFolhasDaImpressao(silentMode As Boolean)
+    ' Recebe o documento de desenho ativo
+    Dim drawDoc As DrawingDocument = ThisDoc.Document
 
-    ' PROCURA PELA FOLHA PELO NOME
-    FOR EACH DRAWSHEET AS SHEET IN DWGDOC.SHEETS
-        IF DRAWSHEET.NAME = SHEETNAME THEN
-            ' ATIVA A FOLHA PARA IMPRESSAO
-            DRAWSHEET.EXCLUDEFROMPRINTING = FALSE
-            EXIT FOR
-        END IF
-    NEXT
-END SUB
+    ' Itera por todas as folhas e as exclui da impressão
+    For Each drawSheet As Sheet In drawDoc.Sheets
+        drawSheet.ExcludeFromPrinting = True
+    Next
 
-' FUNCAO PARA EXCLUIR TODAS AS FOLHAS DA IMPRESSAO
-SUB EXCLUIRFOLHASDAIMPRESSAO()
-    ' RECEBE O DOCUMENTO DE DESENHO ATIVO
-    DIM DWGDOC AS DRAWINGDOCUMENT = THISDOC.DOCUMENT
+    If Not silentMode Then
+        MessageBox.Show("Todas as folhas foram excluídas da impressão.", "Processo Concluído", MessageBoxButtons.OK, MessageBoxIcon.Information)
+    End If
+End Sub
 
-    ' ITERA ATRAVES DAS FOLHAS DO DESENHO E AS EXCLUI DA IMPRESSAO
-    FOR EACH DRAWSHEET AS SHEET IN DWGDOC.SHEETS
-        DRAWSHEET.EXCLUDEFROMPRINTING = TRUE
-    NEXT
+' Função para incluir todas as folhas na impressão
+Sub IncluirFolhasNaImpressao(silentMode As Boolean)
+    ' Recebe o documento de desenho ativo
+    Dim drawDoc As DrawingDocument = ThisDoc.Document
 
-    MSGBOX("TODAS AS FOLHAS FORAM EXCLUIDAS DA IMPRESSAO.", MSGBOXSTYLE.INFORMATION, "FOLHAS EXCLUÍDAS")
-END SUB
+    ' Itera por todas as folhas e as inclui na impressão
+    For Each drawSheet As Sheet In drawDoc.Sheets
+        drawSheet.ExcludeFromPrinting = False
+    Next
 
-' FUNCAO PARA INCLUIR TODAS AS FOLHAS PARA IMPRESSAO
-SUB INCLUIRFOLHASNAIMPRESSAO()
-    ' RECEBE O DOCUMENTO DE DESENHO ATIVO
-    DIM DWGDOC AS DRAWINGDOCUMENT = THISDOC.DOCUMENT
-
-    ' ITERA ATRAVES DAS FOLHAS DO DESENHO E AS INCLUI NA IMPRESSAO
-    FOR EACH DRAWSHEET AS SHEET IN DWGDOC.SHEETS
-        DRAWSHEET.EXCLUDEFROMPRINTING = FALSE
-    NEXT
-
-    MSGBOX("TODAS AS FOLHAS FORAM INCLUIDAS PARA IMPRESSAO.", MSGBOXSTYLE.INFORMATION, "FOLHAS INCLUIDAS")
-END SUB
+    If Not silentMode Then
+        MessageBox.Show("Todas as folhas foram incluídas para impressão.", "Processo Concluído", MessageBoxButtons.OK, MessageBoxIcon.Information)
+    End If
+End Sub
