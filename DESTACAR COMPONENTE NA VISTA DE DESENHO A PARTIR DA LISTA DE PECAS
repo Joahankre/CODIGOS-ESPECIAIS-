@@ -1,0 +1,69 @@
+Sub Main()
+
+    ' Verifica se o documento ativo é um desenho
+    Dim oDoc As DrawingDocument = ThisDoc.Document
+    If oDoc.DocumentType <> DocumentTypeEnum.kDrawingDocumentObject Then
+        MsgBox("Este código só pode ser executado em desenhos.")
+        Exit Sub
+    End If
+
+    ' Verifica se a folha ativa contém uma lista de peças
+    Dim oSheet As Sheet = oDoc.ActiveSheet
+    If oSheet.PartsLists.Count = 0 Then
+        MsgBox("A folha ativa não contém uma lista de peças.")
+        Exit Sub
+    End If
+
+    ' Obtém a lista de peças
+    Dim oPL As PartsList = oSheet.PartsLists.Item(1)
+
+    ' Verifica se a lista de peças contém linhas
+    If oPL.PartsListRows.Count = 0 Then
+        MsgBox("A lista de peças está vazia.")
+        Exit Sub
+    End If
+
+    ' Solicita ao usuário que selecione uma linha da lista de peças
+    Dim rowTitles As New List(Of String)
+    For Each oRow As PartsListRow In oPL.PartsListRows
+        rowTitles.Add(oRow.Item("Item").Value)
+    Next
+
+    Dim selectedRow As String = InputListBox("Selecione um item da Lista de Peças:", rowTitles, rowTitles(0), "Destacar item", "Lista de Peças")
+    If String.IsNullOrEmpty(selectedRow) Then Exit Sub
+
+    ' Encontra a linha correspondente à seleção
+    Dim targetRow As PartsListRow = Nothing
+    For Each oRow As PartsListRow In oPL.PartsListRows
+        If oRow.Item("Item").Value = selectedRow Then
+            targetRow = oRow
+            Exit For
+        End If
+    Next
+
+    If targetRow Is Nothing Then
+        MsgBox("Linha não encontrada.")
+        Exit Sub
+    End If
+
+    ' Obtém o documento de montagem referenciado
+    Dim refDoc As Document = targetRow.ReferencedFiles.Item(1).ReferencedDocument
+
+    ' Solicita ao usuário que selecione uma vista de desenho
+    Dim oView As DrawingView = ThisApplication.CommandManager.Pick(SelectionFilterEnum.kDrawingViewFilter, "Selecione uma vista de desenho")
+
+    ' Cria um conjunto de destaque
+    Dim oSet As HighlightSet = oDoc.CreateHighlightSet()
+    oSet.Color = ThisApplication.TransientObjects.CreateColor(255, 0, 0) ' Cor vermelha
+
+    ' Destaca os segmentos de curva do componente na vista
+    For Each oCurve As DrawingCurve In oView.DrawingCurves(refDoc)
+        For Each oSegment As DrawingCurveSegment In oCurve.Segments
+            oSet.AddItem(oSegment)
+        Next
+    Next
+
+    MsgBox("Componente destacado. Clique em OK para remover o destaque.")
+    oSet.Clear()
+
+End Sub
