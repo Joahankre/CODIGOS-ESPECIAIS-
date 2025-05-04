@@ -1,0 +1,73 @@
+Sub Main()
+    ' Definir variáveis
+    Dim oDrawing As DrawingDocument = ThisApplication.ActiveDocument
+    Dim oSheet As Sheet
+    Dim nomeFolha As String
+    Dim numeroFolha As String
+    Dim tamanhoFolha As String
+    Dim i As Integer
+    Dim oExcelApp As Object
+    Dim oWorkbook As Object
+    Dim oWorksheet As Object
+
+    ' Verificar se é um documento de desenho
+    If oDrawing.DocumentType <> DocumentTypeEnum.kDrawingDocumentObject Then
+        MessageBox.Show("O documento ativo não é um desenho.", "Erro", MessageBoxButtons.OK)
+        Exit Sub
+    End If
+
+    ' Iniciar Excel
+    oExcelApp = CreateObject("Excel.Application")
+    oExcelApp.Visible = True
+
+    ' Criar nova planilha
+    oWorkbook = oExcelApp.Workbooks.Add
+    oWorksheet = oWorkbook.Sheets(1)
+
+    ' Cabeçalhos
+    oWorksheet.Cells(1, 1).Value = "Nome da Folha"
+    oWorksheet.Cells(1, 2).Value = "Número da Folha"
+    oWorksheet.Cells(1, 3).Value = "Tamanho da Folha"
+
+    ' Preencher dados a partir da segunda linha
+    i = 2
+    For Each oSheet In oDrawing.Sheets
+        nomeFolha = oSheet.Name
+        tamanhoFolha = GetPaperSizeName(oSheet)
+
+        ' Tentar extrair número da folha do final do nome (ex: ":4")
+        If nomeFolha.Contains(":") Then
+            Dim partes() As String = Split(nomeFolha, ":")
+            numeroFolha = Trim(partes(partes.Length - 1)) ' número da folha
+            nomeFolha = Trim(String.Join(":", partes, 0, partes.Length - 1)) ' nome sem o número
+        Else
+            numeroFolha = "N/D"
+        End If
+
+        oWorksheet.Cells(i, 1).Value = nomeFolha
+        oWorksheet.Cells(i, 2).Value = numeroFolha
+        oWorksheet.Cells(i, 3).Value = tamanhoFolha
+
+        i += 1
+    Next
+
+    ' Salvar planilha no mesmo local do desenho
+    Dim filePath As String = oDrawing.FullFileName
+    filePath = Left(filePath, Len(filePath) - 4) & "_Folhas_Exportadas.xlsx"
+    oWorkbook.SaveAs(filePath)
+
+    ' Mensagem final
+    MessageBox.Show("Exportação concluída: " & filePath, "Sucesso", MessageBoxButtons.OK)
+End Sub
+
+' Função para identificar o tamanho da folha
+Function GetPaperSizeName(oSheet As Sheet) As String
+    Select Case oSheet.Size
+        Case DrawingSheetSizeEnum.kA0DrawingSheetSize : Return "A0"
+        Case DrawingSheetSizeEnum.kA1DrawingSheetSize : Return "A1"
+        Case DrawingSheetSizeEnum.kA2DrawingSheetSize : Return "A2"
+        Case DrawingSheetSizeEnum.kA3DrawingSheetSize : Return "A3"
+        Case DrawingSheetSizeEnum.kA4DrawingSheetSize : Return "A4"
+        Case Else : Return "Tamanho Personalizado"
+    End Select
+End Function
