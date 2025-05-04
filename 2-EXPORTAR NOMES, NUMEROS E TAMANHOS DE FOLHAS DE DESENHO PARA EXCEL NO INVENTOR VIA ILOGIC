@@ -1,0 +1,102 @@
+' REFERENCIAS
+AddReference "System.Windows.Forms"
+AddReference "System.Drawing"
+
+' ------------------- FORMULARIO -------------------
+Class SimpleForm
+    Inherits System.Windows.Forms.Form
+
+    Private btnExport As System.Windows.Forms.Button
+    Private lblStatus As System.Windows.Forms.Label
+    Private oDrawing As DrawingDocument
+
+    Public Sub New(oDoc As DrawingDocument)
+        oDrawing = oDoc
+
+        Me.Text = "EXPORTAR FOLHAS PARA EXCEL"
+        Me.Width = 400
+        Me.Height = 200
+        Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+        Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+        Me.MaximizeBox = False
+
+        btnExport = New System.Windows.Forms.Button()
+        btnExport.Text = "Exportar para Excel"
+        btnExport.Width = 150
+        btnExport.Height = 40
+        btnExport.Location = New System.Drawing.Point(120, 30)
+        AddHandler btnExport.Click, AddressOf Me.Exportar
+        Me.Controls.Add(btnExport)
+
+        lblStatus = New System.Windows.Forms.Label()
+        lblStatus.Text = ""
+        lblStatus.Width = 350
+        lblStatus.Height = 50
+        lblStatus.Location = New System.Drawing.Point(20, 90)
+        Me.Controls.Add(lblStatus)
+    End Sub
+
+    Private Sub Exportar(ByVal sender As Object, ByVal e As EventArgs)
+        lblStatus.Text = "Exportando folhas..."
+        System.Windows.Forms.Application.DoEvents()
+
+        Try
+            Dim oExcelApp As Object = CreateObject("Excel.Application")
+            oExcelApp.Visible = True
+            Dim oWorkbook = oExcelApp.Workbooks.Add()
+            Dim oWorksheet = oWorkbook.Sheets(1)
+
+            oWorksheet.Cells(1, 1).Value = "NOME DA FOLHA"
+            oWorksheet.Cells(1, 2).Value = "NUMERO DA FOLHA"
+            oWorksheet.Cells(1, 3).Value = "TAMANHO DA FOLHA"
+
+            Dim i As Integer = 2
+            For Each oSheet As Sheet In oDrawing.Sheets
+                Dim nomeFolha As String = oSheet.Name
+                Dim numeroFolha As String = "N/D"
+
+                If nomeFolha.Contains(":") Then
+                    Dim partes() As String = Split(nomeFolha, ":")
+                    numeroFolha = Trim(partes(partes.Length - 1))
+                    nomeFolha = Trim(String.Join(":", partes, 0, partes.Length - 1))
+                End If
+
+                Dim tamanhoFolha As String = ""
+                Select Case oSheet.Size
+                    Case DrawingSheetSizeEnum.kA0DrawingSheetSize : tamanhoFolha = "A0"
+                    Case DrawingSheetSizeEnum.kA1DrawingSheetSize : tamanhoFolha = "A1"
+                    Case DrawingSheetSizeEnum.kA2DrawingSheetSize : tamanhoFolha = "A2"
+                    Case DrawingSheetSizeEnum.kA3DrawingSheetSize : tamanhoFolha = "A3"
+                    Case DrawingSheetSizeEnum.kA4DrawingSheetSize : tamanhoFolha = "A4"
+                    Case Else : tamanhoFolha = "TAMANHO PERSONALIZADO"
+                End Select
+
+                oWorksheet.Cells(i, 1).Value = nomeFolha
+                oWorksheet.Cells(i, 2).Value = numeroFolha
+                oWorksheet.Cells(i, 3).Value = tamanhoFolha
+                i += 1
+            Next
+
+            Dim filePath As String = oDrawing.FullFileName
+            filePath = Strings.Left(filePath, Len(filePath) - 4) & "_Folhas_Exportadas.xlsx"
+            oWorkbook.SaveAs(filePath)
+
+            lblStatus.Text = "Exportação concluída!"
+        Catch ex As Exception
+            lblStatus.Text = "Erro: " & ex.Message
+        End Try
+    End Sub
+End Class
+
+' ------------------- SUB PRINCIPAL -------------------
+Sub Main()
+    Dim oDoc As Document = ThisApplication.ActiveDocument
+    If oDoc.DocumentType <> DocumentTypeEnum.kDrawingDocumentObject Then
+        MessageBox.Show("Abra um desenho (.idw) para executar.", "Erro", MessageBoxButtons.OK)
+        Exit Sub
+    End If
+
+    Dim oDrawing As DrawingDocument = oDoc
+    Dim form As New SimpleForm(oDrawing)
+    System.Windows.Forms.Application.Run(form)
+End Sub
