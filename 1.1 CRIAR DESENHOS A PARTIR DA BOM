@@ -1,0 +1,134 @@
+Imports Inventor.ViewOrientationTypeEnum
+Imports Inventor.DrawingViewStyleEnum
+Imports System.IO
+
+Private Sub Main()
+    CriarDesenhosParaTodaEstrutura(ThisDoc.Document)
+End Sub
+
+Private Sub CriarDesenhosParaTodaEstrutura(ByVal oDoc As Inventor.Document)
+    Dim idioma As String = ThisApplication.Locale
+    Dim baseTemplatePath As String = "C:\Users\Public\Documents\Autodesk\Inventor 2025\Templates\"
+    Dim subpasta As String
+
+    If idioma = "pt-BR" Then
+        subpasta = "pt-BR\Metric\ANSI (mm).idw"
+    Else
+        subpasta = "en-US\Metric\ANSI (mm).idw"
+    End If
+
+    Dim caminhoTemplate As String = baseTemplatePath & subpasta
+    Dim criarDesenhoUnico As Boolean = True
+
+    Dim msgPergunta As String = If(idioma = "pt-BR", "Deseja criar desenhos de TODOS os níveis da ESTRUTURA BOM?", "Create drawings for ALL BOM levels?")
+    Dim msgFinal As String = If(idioma = "pt-BR", "Criação de desenhos concluída com sucesso!", "Drawing creation completed successfully!")
+
+    Dim dwgQuery As Integer = MsgBox(msgPergunta, vbYesNo, "Seleção de Desenho")
+    If dwgQuery <> vbYes Then Exit Sub
+
+    If oDoc.DocumentType <> Inventor.DocumentTypeEnum.kAssemblyDocumentObject Then
+        MsgBox("Documento atual não é um conjunto.", vbExclamation)
+        Exit Sub
+    End If
+
+    Dim oConjunto As AssemblyDocument = CType(oDoc, AssemblyDocument)
+    Dim oBOM As BOM = oConjunto.ComponentDefinition.BOM
+    oBOM.StructuredViewEnabled = True
+    Dim oBOMView As BOMView = oBOM.BOMViews.Item("Structured")
+
+    Dim oDocumentoDesenho As DrawingDocument = Nothing
+    Dim folhaModelo As Sheet = Nothing
+
+    If criarDesenhoUnico Then
+        oDocumentoDesenho = ThisApplication.Documents.Add(DocumentTypeEnum.kDrawingDocumentObject, TemplateFileName:=caminhoTemplate, CreateVisible:=True)
+        folhaModelo = oDocumentoDesenho.Sheets.Item(1)
+    End If
+
+    For Each oBOMRow As BOMRow In oBOMView.BOMRows
+        ProcessarLinhaBOM(oBOMRow, oDocumentoDesenho, folhaModelo, criarDesenhoUnico, caminhoTemplate)
+    Next
+
+    MsgBox(msgFinal, vbInformation, "Processo Finalizado")
+End Sub
+
+Private Sub ProcessarLinhaBOM(oBOMRow As BOMRow, ByRef oDocumentoDesenho As DrawingDocument, ByVal folhaModelo As Sheet, ByVal criarDesenhoUnico As Boolean, ByVal caminhoTemplate As String)
+    If oBOMRow.ComponentDefinitions Is Nothing Then Exit Sub
+
+    For Each compDef As ComponentDefinition In oBOMRow.ComponentDefinitions
+        If compDef.Document Is Nothing Then Continue For
+        If compDef.Document.FullFileName.Contains("Content Center") Then Continue For
+        If compDef.BOMStructure <> BOMStructureEnum.kNormalBOMStructure Then Continue For
+
+        Dim oFolha As Sheet
+
+        ' Criar ou duplicar folha
+        If criarDesenhoUnico Then
+            Dim tempDoc As DrawingDocument = ThisApplication.Documents.Add(DocumentTypeEnum.kDrawingDocumentObject, , False)
+            folhaModelo.CopyTo(tempDoc).CopyTo(oDocumentoDesenho)
+            tempDoc.Close(True)
+            oFolha = oDocumentoDesenho.Sheets.Item(oDocumentoDesenho.Sheets.Count)
+            oFolha.Name = IO.Path.GetFileNameWithoutExtension(compDef.Document.FullFileName)
+        Else
+            oDocumentoDesenho = ThisApplication.Documents.Add(DocumentTypeEnum.kDrawingDocumentObject, TemplateFileName:=caminhoTemplate, CreateVisible:=True)
+            oFolha = oDocumentoDesenho.Sheets.Item(1)
+        End If
+
+        ' Criar vistas
+        Dim escalaAutomatica As Double = CalcularEscalaIdeal(compDef)
+        Dim centroX As Double = 20
+        Dim centroY As Double = 15
+
+        Dim oPontoBase = ThisApplication.TransientGeometry.CreatePoint2d(centroX, centroY)
+        Dim oPontoLat = ThisApplication.TransientGeometry.CreatePoint2d(centroX + 8, centroY)
+        Dim oPontoSup = ThisApplication.TransientGeometry.CreatePoint2d(centroX, centroY - 8)
+        Dim oPontoIso = ThisApplication.TransientGeometry.CreatePoint2d(centroX + 8, centroY - 8)
+
+        Try
+            Dim oVistaBase = oFolha.DrawingViews.AddBaseView( _
+                compDef.Document, oPontoBase, escalaAutomatica, _
+                kFrontViewOrientation, DrawingViewStyleEnum.kHiddenLineRemovedDrawingViewStyle)
+
+            oFolha.DrawingViews.AddProjectedView(oVistaBase, oPontoLat, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, escalaAutomatica)
+            oFolha.DrawingViews.AddProjectedView(oVistaBase, oPontoSup, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, escalaAutomatica)
+            oFolha.DrawingViews.AddProjectedView(oVistaBase, oPontoIso, DrawingViewStyleEnum.kFromBaseDrawingViewStyle, escalaAutomatica)
+        Catch ex As Exception
+            MsgBox("Erro ao criar vistas para " & compDef.Document.DisplayName & ": " & ex.Message)
+        End Try
+
+        ' Recursão: se for subconjunto, processa também os subníveis
+        If TypeOf compDef Is AssemblyComponentDefinition Then
+            Dim subBOM As BOM = CType(compDef, AssemblyComponentDefinition).BOM
+            subBOM.StructuredViewEnabled = True
+            Dim subView As BOMView = subBOM.BOMViews.Item("Structured")
+            For Each subRow As BOMRow In subView.BOMRows
+                ProcessarLinhaBOM(subRow, oDocumentoDesenho, folhaModelo, criarDesenhoUnico, caminhoTemplate)
+            Next
+        End If
+    Next
+End Sub
+
+' Função para calcular automaticamente a escala ideal
+Private Function CalcularEscalaIdeal(compDef As ComponentDefinition) As Double
+    Dim oBox As Box = compDef.RangeBox
+    Dim largura As Double = Math.Abs(oBox.MaxPoint.X - oBox.MinPoint.X)
+    Dim altura As Double = Math.Abs(oBox.MaxPoint.Y - oBox.MinPoint.Y)
+    Dim profundidade As Double = Math.Abs(oBox.MaxPoint.Z - oBox.MinPoint.Z)
+    Dim tamanhoMaximo As Double = Math.Max(largura, Math.Max(altura, profundidade)) * 10 ' em mm
+
+    Dim areaUtil As Double = 180 ' mm
+    Dim escala As Double = areaUtil / tamanhoMaximo
+
+    If escala >= 1 Then
+        escala = 1
+    ElseIf escala >= 0.5 Then
+        escala = 0.5
+    ElseIf escala >= 0.2 Then
+        escala = 0.2
+    ElseIf escala >= 0.1 Then
+        escala = 0.1
+    Else
+        escala = 0.05
+    End If
+
+    Return escala
+End Function
